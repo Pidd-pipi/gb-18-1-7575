@@ -14,3 +14,7 @@ export const searchKnowledge = (subjectId: string, keyword: string) => {
     params: { keyword }
   })
 }
+
+export const getKnowledgeNode = (nodeId: string) => {
+  return request.get<KnowledgeNode>(`/knowledge/node/${nodeId}`)
+}

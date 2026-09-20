@@ -1,9 +1,21 @@
-from fastapi import APIRouter, Depends, HTTPException
+from typing import Optional
+from fastapi import APIRouter, Depends, HTTPException, Query
 from app.modules.practice.models import PracticeConfig, PracticeSubmit
 from app.modules.practice.service import PracticeService
 from app.modules.auth.dependencies import get_current_user
 
 router = APIRouter()
+
+
+def _session_payload(session: dict) -> dict:
+    return {
+        "session_id": session["id"],
+        "mode": session["mode"],
+        "subject_id": session["subject_id"],
+        "knowledge_ids": session.get("knowledge_ids"),
+        "status": session.get("status", "in_progress"),
+        "progress": PracticeService._build_progress(session)
+    }
 
 
 @router.post("/start")
@@ -22,27 +34,32 @@ async def start_practice(
         )
 
         question = await PracticeService.get_current_question(session)
-        question_response = {
-            "id": str(question["_id"]),
-            "type": question["type"],
-            "content": question["content"],
-            "options": question.get("options"),
-            "difficulty": question["difficulty"],
-            "knowledge_ids": question.get("knowledge_ids", [])
-        } if question else None
-
         return {
-            "session_id": session["id"],
-            "current_question": question_response,
-            "progress": {
-                "current": 0,
-                "total": session["total"],
-                "correct": 0,
-                "accuracy": 0
-            }
+            **_session_payload(session),
+            "current_question": PracticeService._question_response(question)
         }
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/active")
+async def get_active_session(
+    mode: str = Query(...),
+    subject_id: str = Query(...),
+    knowledge_id: Optional[str] = Query(None),
+    user: dict = Depends(get_current_user)
+):
+    """查找该知识点下未完成的练习会话，用于退出后续练。"""
+    knowledge_ids = [knowledge_id] if knowledge_id else None
+    session = await PracticeService.get_active_session(
+        user_id=str(user["_id"]),
+        mode=mode,
+        subject_id=subject_id,
+        knowledge_ids=knowledge_ids
+    )
+    if not session:
+        return None
+    return _session_payload(session)
 
 
 @router.post("/submit")
@@ -62,28 +79,19 @@ async def submit_answer(
         raise HTTPException(status_code=400, detail=str(e))
 
 
-@router.get("/navigate/{session_id}/{direction}")
-async def navigate(
+@router.get("/question/{session_id}/{index}")
+async def get_question_at(
     session_id: str,
-    direction: str,
+    index: int,
     user: dict = Depends(get_current_user)
 ):
+    """只读获取指定位置的题目与作答记录，不改进度。"""
     try:
-        question = await PracticeService.navigate_question(
+        return await PracticeService.get_question_at(
             session_id=session_id,
             user_id=str(user["_id"]),
-            direction=direction
+            index=index
         )
-        if question:
-            return {
-                "id": str(question["_id"]),
-                "type": question["type"],
-                "content": question["content"],
-                "options": question.get("options"),
-                "difficulty": question["difficulty"],
-                "knowledge_ids": question.get("knowledge_ids", [])
-            }
-        return None
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -112,16 +120,7 @@ async def get_session(
         raise HTTPException(status_code=404, detail="练习会话不存在")
 
     question = await PracticeService.get_current_question(session)
-    question_response = {
-        "id": str(question["_id"]),
-        "type": question["type"],
-        "content": question["content"],
-        "options": question.get("options"),
-        "difficulty": question["difficulty"],
-        "knowledge_ids": question.get("knowledge_ids", [])
-    } if question else None
-
     return {
-        "session": session,
-        "current_question": question_response
+        **_session_payload(session),
+        "current_question": PracticeService._question_response(question)
     }

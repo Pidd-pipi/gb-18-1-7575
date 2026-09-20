@@ -65,17 +65,48 @@ export interface PracticeSession {
   correct_count: number
 }
 
-export interface PracticeResult {
-  question_id: string
+export interface PracticeProgress {
+  current: number
+  total: number
+  answered: number
+  correct: number
+  accuracy: number
+  status: 'in_progress' | 'finished'
+}
+
+export interface PracticeSessionInfo {
+  session_id: string
+  mode: string
+  subject_id: string
+  knowledge_ids?: string[] | null
+  status: string
+  progress: PracticeProgress
+  current_question?: Question | null
+}
+
+export interface AnswerRecord {
+  user_answer: any
   is_correct: boolean
   correct_answer: any
   explanation?: string
-  progress: {
-    current: number
-    total: number
-    correct: number
-    accuracy: number
-  }
+  submitted_at?: string
+}
+
+export interface SessionQuestion {
+  index: number
+  total: number
+  question: Question
+  record: AnswerRecord | null
+}
+
+export interface PracticeResult {
+  question_id: string
+  is_correct: boolean
+  user_answer?: any
+  correct_answer: any
+  explanation?: string
+  submitted_at?: string
+  progress: PracticeProgress
   is_finished: boolean
 }
 

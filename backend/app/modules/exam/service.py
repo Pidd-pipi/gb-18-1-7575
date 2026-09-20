@@ -1,9 +1,8 @@
 from typing import Optional, List, Dict, Any
 from bson import ObjectId
 from datetime import datetime, timedelta
-import json
 from app.core.database import get_db
-from app.core.redis import get_redis
+from app.core.redis import get_redis, cache_dumps, cache_loads
 from app.modules.questions.service import QuestionService
 
 
@@ -51,7 +50,7 @@ class ExamService:
 
         if redis:
             key = f"exam:{user_id}:{str(result.inserted_id)}"
-            await redis.setex(key, duration_minutes * 60 + 300, json.dumps(session_dict))
+            await redis.setex(key, duration_minutes * 60 + 300, cache_dumps(session_dict))
 
         return session_dict
 
@@ -64,7 +63,7 @@ class ExamService:
             key = f"exam:{user_id}:{session_id}"
             cached = await redis.get(key)
             if cached:
-                return json.loads(cached)
+                return cache_loads(cached)
 
         if not ObjectId.is_valid(session_id):
             return None

@@ -20,6 +20,14 @@ class PracticeQuestion(BaseModel):
     knowledge_ids: List[str]
 
 
+class AnswerRecord(BaseModel):
+    user_answer: Any
+    is_correct: bool
+    correct_answer: Any
+    explanation: Optional[str] = None
+    submitted_at: Optional[str] = None
+
+
 class PracticeSession(BaseModel):
     id: str
     mode: str
@@ -30,6 +38,7 @@ class PracticeSession(BaseModel):
     answers: dict
     total: int
     correct_count: int
+    status: str = "in_progress"
     created_at: datetime
     updated_at: datetime
 
@@ -46,3 +55,4 @@ class PracticeResult(BaseModel):
     correct_answer: Any
     explanation: Optional[str]
     progress: dict
+    is_finished: bool = False

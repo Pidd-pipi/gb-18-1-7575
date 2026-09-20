@@ -72,18 +72,8 @@ async def start_error_practice(
         user_id=str(user["_id"]),
         mode="error_practice",
         subject_id="error_review",
-        question_count=len(error_ids)
+        question_ids=error_ids
     )
-
-    from bson import ObjectId
-    from app.core.database import get_db
-    db = get_db()
-    await db.practice_sessions.update_one(
-        {"_id": ObjectId(session["id"])},
-        {"$set": {"question_ids": error_ids}}
-    )
-    session["question_ids"] = error_ids
-    session["total"] = len(error_ids)
 
     question = await PracticeService.get_current_question(session)
     question_response = {

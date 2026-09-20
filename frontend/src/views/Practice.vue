@@ -6,11 +6,17 @@
       @click-left="handleBack"
     >
       <template #right>
-        <span class="nav-progress">{{ progress.current + 1 }} / {{ progress.total }}</span>
+        <span v-if="progress.total > 0" class="nav-progress">{{ displayIndex }} / {{ progress.total }}</span>
+        <van-icon
+          v-else-if="mode !== 'error_practice'"
+          name="exchange"
+          class="nav-switch"
+          @click="openPicker"
+        />
       </template>
     </van-nav-bar>
 
-    <div class="progress-header">
+    <div v-if="progress.total > 0 && !showSummary" class="progress-header">
       <div class="progress-bar">
         <div class="progress-fill" :style="{ width: progressPercent + '%' }"></div>
       </div>
@@ -20,7 +26,7 @@
       </div>
     </div>
 
-    <div class="question-container" v-if="currentQuestion && !isFinished">
+    <div class="question-container" v-if="currentQuestion && !showSummary">
       <div class="question-header">
         <span class="question-type">{{ questionTypeLabel }}</span>
         <span class="difficulty-tag" :class="'difficulty-' + currentQuestion.difficulty">
@@ -47,7 +53,7 @@
 
         <template v-else>
           <div
-            v-for="option in currentQuestion.options"
+            v-for="option in displayOptions"
             :key="option.key"
             class="option-item"
             :class="{ selected: isOptionSelected(option.key) }"
@@ -61,43 +67,46 @@
 
       <div v-if="showResult" class="result-container">
         <div class="options-container">
-          <div
-            v-if="currentQuestion.type !== 'fill_blank'"
-            v-for="option in currentQuestion.options"
-            :key="option.key"
-            class="option-item"
-            :class="getOptionClass(option.key)"
-          >
-            <span class="option-key">{{ option.key }}</span>
-            <span class="option-content">{{ option.content }}</span>
-          </div>
+          <template v-if="currentQuestion.type !== 'fill_blank'">
+            <div
+              v-for="option in displayOptions"
+              :key="option.key"
+              class="option-item"
+              :class="getOptionClass(option.key)"
+            >
+              <span class="option-key">{{ option.key }}</span>
+              <span class="option-content">{{ option.content }}</span>
+            </div>
+          </template>
 
           <div v-else class="fill-result">
             <div class="result-row">
               <span class="result-label">你的答案：</span>
-              <span class="result-value wrong">{{ fillAnswer || '未作答' }}</span>
+              <span class="result-value" :class="currentRecord?.is_correct ? 'correct' : 'wrong'">
+                {{ currentRecord?.user_answer || '未作答' }}
+              </span>
             </div>
             <div class="result-row">
               <span class="result-label">正确答案：</span>
-              <span class="result-value correct">{{ result?.correct_answer }}</span>
+              <span class="result-value correct">{{ currentRecord?.correct_answer }}</span>
             </div>
           </div>
         </div>
 
-        <div class="result-badge" :class="result?.is_correct ? 'correct' : 'wrong'">
-          {{ result?.is_correct ? '✓ 回答正确' : '✗ 回答错误' }}
+        <div class="result-badge" :class="currentRecord?.is_correct ? 'correct' : 'wrong'">
+          {{ currentRecord?.is_correct ? '✓ 回答正确' : '✗ 回答错误' }}
         </div>
 
-        <div v-if="result?.explanation" class="explanation-box">
+        <div v-if="currentRecord?.explanation" class="explanation-box">
           <div class="explanation-title">解析</div>
-          <div class="explanation-content">{{ result.explanation }}</div>
+          <div class="explanation-content">{{ currentRecord.explanation }}</div>
         </div>
       </div>
     </div>
 
-    <div v-if="isFinished" class="finished-container">
+    <div v-if="showSummary" class="finished-container">
       <div class="score-circle">
-        <div class="score-value">{{ progress.accuracy }}</div>
+        <div class="score-value">{{ summaryAccuracy }}</div>
         <div class="score-label">正确率</div>
       </div>
 
@@ -116,21 +125,39 @@
         </div>
       </div>
 
+      <div v-if="progress.total - progress.correct > 0" class="archive-hint">
+        错题已自动归档到错题本，可随时回顾重练
+      </div>
+
       <div class="finished-actions">
-        <van-button type="primary" block round @click="goHome">
-          返回首页
+        <van-button type="primary" block round @click="restart">
+          再练一次
+        </van-button>
+        <van-button
+          v-if="progress.total - progress.correct > 0"
+          block
+          round
+          @click="goErrorBook"
+        >
+          查看错题本
         </van-button>
         <van-button block round @click="goBackToSubject">
-          继续练习
+          返回
         </van-button>
       </div>
     </div>
 
-    <div class="nav-bottom" v-if="!isFinished">
+    <div v-if="!currentQuestion && !showSummary && !loading" class="empty-container">
+      <van-empty description="请选择知识点开始练习">
+        <van-button type="primary" round @click="openPicker">选择知识点</van-button>
+      </van-empty>
+    </div>
+
+    <div class="nav-bottom" v-if="currentQuestion && !showSummary">
       <van-button
         plain
         size="large"
-        :disabled="progress.current === 0"
+        :disabled="viewIndex === 0"
         @click="goPrev"
       >
         上一题
@@ -140,20 +167,97 @@
         type="primary"
         size="large"
         :loading="submitting"
-        @click="handleSubmit"
+        :disabled="!showResult && !hasAnswer"
+        @click="handlePrimary"
       >
-        {{ showResult ? '下一题' : '提交答案' }}
+        {{ primaryButtonText }}
       </van-button>
     </div>
+
+    <van-popup
+      v-model:show="showPicker"
+      position="bottom"
+      :style="{ height: '70%' }"
+      round
+    >
+      <div class="picker">
+        <div class="picker-header">
+          <div class="picker-title">选择知识点</div>
+          <van-icon name="cross" @click="showPicker = false" />
+        </div>
+
+        <div class="picker-body">
+          <div class="picker-label">学科</div>
+          <div class="subject-chips">
+            <span
+              v-for="subject in subjects"
+              :key="subject.id"
+              class="chip"
+              :class="{ active: pickerSubjectId === subject.id }"
+              @click="selectPickerSubject(subject.id)"
+            >
+              {{ subject.icon }} {{ subject.name }}
+            </span>
+          </div>
+
+          <div class="picker-label">知识点</div>
+          <div v-if="pickerLoading" class="loading-container">
+            <van-loading />
+          </div>
+          <div v-else class="knowledge-list">
+            <div
+              class="knowledge-option"
+              :class="{ active: pickerKnowledgeId === '' }"
+              @click="pickerKnowledgeId = ''"
+            >
+              <span class="knowledge-name">全部题目</span>
+            </div>
+            <div
+              v-for="node in knowledgeOptions"
+              :key="node.id"
+              class="knowledge-option"
+              :class="{ active: pickerKnowledgeId === node.id }"
+              @click="pickerKnowledgeId = node.id"
+            >
+              <span class="knowledge-name">{{ node.path }}</span>
+              <span class="knowledge-count">{{ node.question_count }} 题</span>
+            </div>
+            <div v-if="knowledgeOptions.length === 0" class="empty-tip">
+              该学科下暂无知识点
+            </div>
+          </div>
+        </div>
+
+        <div class="picker-footer">
+          <van-button block type="primary" round @click="confirmPicker">
+            开始练习
+          </van-button>
+        </div>
+      </div>
+    </van-popup>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { showConfirmDialog, showLoadingToast, closeToast } from 'vant'
-import { startPractice, submitAnswer, navigateQuestion } from '@/api/practice'
-import type { Question, PracticeResult } from '@/types'
+import { showConfirmDialog, showLoadingToast, closeToast, showToast } from 'vant'
+import {
+  startPractice,
+  submitAnswer,
+  getPracticeSession,
+  getActiveSession,
+  getSessionQuestion
+} from '@/api/practice'
+import { startErrorPractice } from '@/api/errors'
+import { getSubjects, getKnowledgeTree, getKnowledgeNode } from '@/api/knowledge'
+import type {
+  Question,
+  AnswerRecord,
+  PracticeSessionInfo,
+  Subject,
+  KnowledgeNode
+} from '@/types'
 
 const route = useRoute()
 const router = useRouter()
@@ -162,21 +266,35 @@ const mode = computed(() => route.params.mode as string)
 const query = computed(() => route.query)
 
 const sessionId = ref('')
+const viewIndex = ref(0)
 const currentQuestion = ref<Question | null>(null)
+const currentRecord = ref<AnswerRecord | null>(null)
 const selectedAnswer = ref<any>(null)
 const selectedAnswers = ref<string[]>([])
 const fillAnswer = ref('')
-const showResult = ref(false)
-const result = ref<PracticeResult | null>(null)
-const isFinished = ref(false)
+const showSummary = ref(false)
 const submitting = ref(false)
+const loading = ref(false)
+
+const scope = reactive({
+  subjectId: '',
+  knowledgeId: ''
+})
 
 const progress = reactive({
   current: 0,
   total: 0,
   correct: 0,
-  accuracy: 0
+  accuracy: 0,
+  status: 'in_progress'
 })
+
+const showPicker = ref(false)
+const subjects = ref<Subject[]>([])
+const pickerSubjectId = ref('')
+const pickerKnowledgeId = ref('')
+const knowledgeOptions = ref<{ id: string; path: string; question_count: number }[]>([])
+const pickerLoading = ref(false)
 
 const modeName = computed(() => {
   const modeMap: Record<string, string> = {
@@ -187,8 +305,20 @@ const modeName = computed(() => {
   return modeMap[mode.value] || '练习'
 })
 
+const showResult = computed(() => currentRecord.value !== null)
+
+const isFinished = computed(() => progress.status === 'finished')
+
+const displayIndex = computed(() => Math.min(viewIndex.value + 1, progress.total))
+
 const progressPercent = computed(() => {
-  return Math.round(((progress.current + 1) / progress.total) * 100)
+  if (!progress.total) return 0
+  return Math.round((progress.current / progress.total) * 100)
+})
+
+const summaryAccuracy = computed(() => {
+  if (!progress.total) return 0
+  return Math.round((progress.correct / progress.total) * 1000) / 10
 })
 
 const questionTypeLabel = computed(() => {
@@ -210,6 +340,36 @@ const difficultyLabel = computed(() => {
   return diffMap[currentQuestion.value?.difficulty || ''] || ''
 })
 
+// 判断题没有选项数据时，使用默认的对/错选项
+const displayOptions = computed(() => {
+  const q = currentQuestion.value
+  if (!q) return []
+  if (q.options && q.options.length > 0) return q.options
+  if (q.type === 'true_false') {
+    return [
+      { key: 'A', content: '正确' },
+      { key: 'B', content: '错误' }
+    ]
+  }
+  return []
+})
+
+const hasAnswer = computed(() => {
+  if (!currentQuestion.value) return false
+  if (currentQuestion.value.type === 'fill_blank') return !!fillAnswer.value.trim()
+  if (currentQuestion.value.type === 'multiple_choice') return selectedAnswers.value.length > 0
+  return selectedAnswer.value !== null && selectedAnswer.value !== undefined
+})
+
+const primaryButtonText = computed(() => {
+  if (!showResult.value) return '提交答案'
+  if (isFinished.value && viewIndex.value >= progress.total - 1) return '查看结果'
+  return '下一题'
+})
+
+const storageKey = () =>
+  `practice_session:${mode.value}:${scope.subjectId}:${scope.knowledgeId || 'all'}`
+
 const isOptionSelected = (key: string) => {
   if (currentQuestion.value?.type === 'multiple_choice') {
     return selectedAnswers.value.includes(key)
@@ -219,9 +379,11 @@ const isOptionSelected = (key: string) => {
 
 const getOptionClass = (key: string) => {
   const classes: string[] = []
-  if (key === result.value?.correct_answer) {
+  const correct = currentRecord.value?.correct_answer
+  const isCorrectKey = Array.isArray(correct) ? correct.includes(key) : key === correct
+  if (isCorrectKey) {
     classes.push('correct')
-  } else if (isOptionSelected(key) && !result.value?.is_correct) {
+  } else if (isOptionSelected(key) && !currentRecord.value?.is_correct) {
     classes.push('wrong')
   }
   return classes
@@ -245,63 +407,297 @@ const selectOption = (key: string) => {
 
 const getAnswerToSubmit = () => {
   if (currentQuestion.value?.type === 'fill_blank') {
-    return fillAnswer.value
+    return fillAnswer.value.trim()
   } else if (currentQuestion.value?.type === 'multiple_choice') {
     return selectedAnswers.value
   }
   return selectedAnswer.value
 }
 
-const handleSubmit = async () => {
-  if (!showResult.value) {
-    if (!getAnswerToSubmit()) {
-      return
-    }
-
-    submitting.value = true
-    try {
-      const answer = getAnswerToSubmit()
-      result.value = await submitAnswer(sessionId.value, currentQuestion.value!.id, answer)
-
-      progress.current = result.value.progress.current
-      progress.correct = result.value.progress.correct
-      progress.accuracy = result.value.progress.accuracy
-
-      showResult.value = true
-      isFinished.value = result.value.is_finished
-    } catch (error) {
-      console.error(error)
-    } finally {
-      submitting.value = false
-    }
+const applyRecordToInputs = (record: AnswerRecord | null) => {
+  selectedAnswer.value = null
+  selectedAnswers.value = []
+  fillAnswer.value = ''
+  if (!record) return
+  if (Array.isArray(record.user_answer)) {
+    selectedAnswers.value = [...record.user_answer]
+  } else if (currentQuestion.value?.type === 'fill_blank') {
+    fillAnswer.value = record.user_answer ?? ''
   } else {
-    if (isFinished.value) {
-      return
+    selectedAnswer.value = record.user_answer
+  }
+}
+
+const loadQuestion = async (index: number) => {
+  const data = await getSessionQuestion(sessionId.value, index)
+  currentQuestion.value = data.question
+  currentRecord.value = data.record
+  viewIndex.value = data.index
+  applyRecordToInputs(data.record)
+}
+
+const applyProgress = (p: {
+  current: number
+  total: number
+  correct: number
+  accuracy: number
+  status: string
+}) => {
+  progress.current = p.current
+  progress.total = p.total
+  progress.correct = p.correct
+  progress.accuracy = p.accuracy
+  progress.status = p.status
+}
+
+const applySession = async (info: PracticeSessionInfo) => {
+  sessionId.value = info.session_id
+  applyProgress(info.progress)
+  if (mode.value === 'sequential') {
+    localStorage.setItem(storageKey(), info.session_id)
+  }
+  if (info.progress.status === 'finished') {
+    showSummary.value = true
+    currentQuestion.value = null
+    return
+  }
+  await loadQuestion(info.progress.current)
+}
+
+const startNew = async () => {
+  const knowledgeIds = scope.knowledgeId ? [scope.knowledgeId] : undefined
+  const result = await startPractice({
+    mode: mode.value,
+    subject_id: scope.subjectId,
+    knowledge_ids: knowledgeIds,
+    question_count: parseInt(query.value.count as string) || 20,
+    difficulty: (query.value.difficulty as string) || undefined
+  })
+  showSummary.value = false
+  await applySession(result)
+}
+
+const restoreOrStart = async () => {
+  // 顺序练习：优先恢复未完成的会话（本地记录 → 服务端查找）
+  if (mode.value === 'sequential') {
+    const savedId = localStorage.getItem(storageKey())
+    if (savedId) {
+      try {
+        const info = await getPracticeSession(savedId)
+        if (info.status === 'in_progress') {
+          await applySession(info)
+          return
+        }
+      } catch (error) {
+        localStorage.removeItem(storageKey())
+      }
     }
 
-    showLoadingToast({ message: '加载中...', duration: 0 })
     try {
-      const question = await navigateQuestion(sessionId.value, 'next')
-      if (question) {
-        currentQuestion.value = question
-        resetAnswerState()
+      const active = await getActiveSession({
+        mode: mode.value,
+        subject_id: scope.subjectId,
+        knowledge_id: scope.knowledgeId || undefined
+      })
+      if (active) {
+        await applySession(active)
+        return
       }
     } catch (error) {
       console.error(error)
-    } finally {
-      closeToast()
     }
+  }
+
+  await startNew()
+}
+
+const startErrorSession = async () => {
+  const result = await startErrorPractice({
+    question_count: parseInt(query.value.count as string) || 20
+  })
+  if (!result.session_id) {
+    showToast(result.message || '没有错题需要练习')
+    setTimeout(() => router.push('/errors'), 800)
+    return
+  }
+  sessionId.value = result.session_id
+  applyProgress({
+    current: result.progress.current,
+    total: result.progress.total,
+    correct: result.progress.correct,
+    accuracy: result.progress.accuracy,
+    status: 'in_progress'
+  })
+  await loadQuestion(0)
+}
+
+const initPractice = async () => {
+  loading.value = true
+  showLoadingToast({ message: '加载中...', duration: 0 })
+  try {
+    if (mode.value === 'error_practice') {
+      await startErrorSession()
+      return
+    }
+
+    scope.subjectId = (query.value.subjectId as string) || ''
+    scope.knowledgeId = (query.value.knowledgeIds as string) || ''
+
+    // 只有知识点没有学科时，先反查所属学科
+    if (!scope.subjectId && scope.knowledgeId) {
+      try {
+        const node = await getKnowledgeNode(scope.knowledgeId)
+        scope.subjectId = node.subject_id
+      } catch (error) {
+        console.error(error)
+      }
+    }
+
+    if (!scope.subjectId) {
+      await openPicker()
+      return
+    }
+
+    await restoreOrStart()
+  } catch (error) {
+    console.error(error)
+  } finally {
+    loading.value = false
+    closeToast()
+  }
+}
+
+const handleSubmit = async () => {
+  if (!hasAnswer.value || !currentQuestion.value) return
+
+  submitting.value = true
+  try {
+    const result = await submitAnswer(
+      sessionId.value,
+      currentQuestion.value.id,
+      getAnswerToSubmit()
+    )
+    currentRecord.value = {
+      user_answer: result.user_answer,
+      is_correct: result.is_correct,
+      correct_answer: result.correct_answer,
+      explanation: result.explanation,
+      submitted_at: result.submitted_at
+    }
+    applyProgress(result.progress)
+  } catch (error) {
+    console.error(error)
+  } finally {
+    submitting.value = false
+  }
+}
+
+const handlePrimary = async () => {
+  if (!showResult.value) {
+    await handleSubmit()
+    return
+  }
+
+  if (isFinished.value && viewIndex.value >= progress.total - 1) {
+    showSummary.value = true
+    currentQuestion.value = null
+    return
+  }
+
+  showLoadingToast({ message: '加载中...', duration: 0 })
+  try {
+    await loadQuestion(viewIndex.value + 1)
+  } catch (error) {
+    console.error(error)
+  } finally {
+    closeToast()
   }
 }
 
 const goPrev = async () => {
+  if (viewIndex.value === 0) return
   showLoadingToast({ message: '加载中...', duration: 0 })
   try {
-    const question = await navigateQuestion(sessionId.value, 'prev')
-    if (question) {
-      currentQuestion.value = question
-      resetAnswerState()
-      progress.current = Math.max(0, progress.current - 1)
+    await loadQuestion(viewIndex.value - 1)
+  } catch (error) {
+    console.error(error)
+  } finally {
+    closeToast()
+  }
+}
+
+const flattenKnowledge = (nodes: KnowledgeNode[], prefix: string) => {
+  const result: { id: string; path: string; question_count: number }[] = []
+  for (const node of nodes) {
+    const path = prefix ? `${prefix} / ${node.name}` : node.name
+    if (node.children && node.children.length > 0) {
+      result.push(...flattenKnowledge(node.children, path))
+    } else {
+      result.push({ id: node.id, path, question_count: node.question_count })
+    }
+  }
+  return result
+}
+
+const openPicker = async () => {
+  showPicker.value = true
+  if (subjects.value.length === 0) {
+    try {
+      subjects.value = await getSubjects()
+    } catch (error) {
+      console.error(error)
+    }
+  }
+  pickerSubjectId.value = scope.subjectId || subjects.value[0]?.id || ''
+  if (pickerSubjectId.value) {
+    await selectPickerSubject(pickerSubjectId.value)
+  }
+  pickerKnowledgeId.value = scope.knowledgeId
+}
+
+const selectPickerSubject = async (subjectId: string) => {
+  pickerSubjectId.value = subjectId
+  pickerKnowledgeId.value = ''
+  pickerLoading.value = true
+  try {
+    const tree = await getKnowledgeTree(subjectId)
+    knowledgeOptions.value = flattenKnowledge(tree, '')
+  } catch (error) {
+    console.error(error)
+  } finally {
+    pickerLoading.value = false
+  }
+}
+
+const confirmPicker = async () => {
+  if (!pickerSubjectId.value) {
+    showToast('请先选择学科')
+    return
+  }
+  showPicker.value = false
+  scope.subjectId = pickerSubjectId.value
+  scope.knowledgeId = pickerKnowledgeId.value
+  showSummary.value = false
+  loading.value = true
+  showLoadingToast({ message: '加载中...', duration: 0 })
+  try {
+    await restoreOrStart()
+  } catch (error) {
+    console.error(error)
+  } finally {
+    loading.value = false
+    closeToast()
+  }
+}
+
+const restart = async () => {
+  showSummary.value = false
+  showLoadingToast({ message: '加载中...', duration: 0 })
+  try {
+    if (mode.value === 'error_practice') {
+      await startErrorSession()
+    } else {
+      await startNew()
     }
   } catch (error) {
     console.error(error)
@@ -310,18 +706,14 @@ const goPrev = async () => {
   }
 }
 
-const resetAnswerState = () => {
-  showResult.value = false
-  result.value = null
-  selectedAnswer.value = null
-  selectedAnswers.value = []
-  fillAnswer.value = ''
-}
-
 const handleBack = () => {
+  if (showSummary.value || !currentQuestion.value) {
+    goBackToSubject()
+    return
+  }
   showConfirmDialog({
     title: '确认退出',
-    message: '练习进度已保存，确定要退出吗？'
+    message: '练习进度已保存，下次可从中断处继续'
   })
     .then(() => {
       goBackToSubject()
@@ -330,39 +722,17 @@ const handleBack = () => {
 }
 
 const goBackToSubject = () => {
-  if (query.value.subjectId) {
+  if (scope.subjectId) {
+    router.push(`/knowledge/${scope.subjectId}`)
+  } else if (query.value.subjectId) {
     router.push(`/knowledge/${query.value.subjectId}`)
   } else {
     router.push('/subjects')
   }
 }
 
-const goHome = () => {
-  router.push('/')
-}
-
-const initPractice = async () => {
-  showLoadingToast({ message: '加载中...', duration: 0 })
-  try {
-    const knowledgeIds = query.value.knowledgeIds ? [query.value.knowledgeIds as string] : undefined
-
-    const startResult = await startPractice({
-      mode: mode.value,
-      subject_id: query.value.subjectId as string,
-      knowledge_ids: knowledgeIds,
-      question_count: parseInt(query.value.count as string) || 20,
-      difficulty: (query.value.difficulty as string) || undefined
-    })
-
-    sessionId.value = startResult.session_id
-    currentQuestion.value = startResult.current_question
-    progress.total = startResult.progress.total
-    progress.current = startResult.progress.current
-  } catch (error) {
-    console.error(error)
-  } finally {
-    closeToast()
-  }
+const goErrorBook = () => {
+  router.push('/errors')
 }
 
 onMounted(() => {
@@ -381,6 +751,11 @@ onMounted(() => {
   font-size: 14px;
   color: white;
   opacity: 0.9;
+}
+
+.nav-switch {
+  font-size: 18px;
+  color: white;
 }
 
 .progress-header {
@@ -577,25 +952,196 @@ onMounted(() => {
   text-align: center;
 }
 
+.score-circle {
+  width: 140px;
+  height: 140px;
+  border-radius: 50%;
+  background: white;
+  box-shadow: 0 4px 16px rgba(59, 130, 246, 0.15);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto 24px;
+}
+
+.score-value {
+  font-size: 36px;
+  font-weight: 700;
+  color: #3b82f6;
+}
+
+.score-label {
+  font-size: 13px;
+  color: #64748b;
+}
+
 .finished-stats {
   display: flex;
   justify-content: center;
   gap: 40px;
-  margin-top: 32px;
+  margin-bottom: 16px;
 }
 
-.finished-stats .stat-value.correct {
+.stat-value {
+  font-size: 24px;
+  font-weight: 700;
+  color: #1a1a2e;
+}
+
+.stat-value.correct {
   color: #22c55e;
 }
 
-.finished-stats .stat-value.wrong {
+.stat-value.wrong {
   color: #ef4444;
 }
 
+.stat-label {
+  font-size: 12px;
+  color: #94a3b8;
+  margin-top: 4px;
+}
+
+.archive-hint {
+  font-size: 13px;
+  color: #64748b;
+  background: #fff7ed;
+  border-radius: 10px;
+  padding: 10px 16px;
+  margin: 0 8px 8px;
+}
+
 .finished-actions {
-  margin-top: 40px;
+  margin-top: 24px;
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+
+.empty-container {
+  padding-top: 80px;
+}
+
+.nav-bottom {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  gap: 12px;
+  padding: 12px 16px;
+  background: white;
+  box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.06);
+}
+
+.nav-bottom .van-button {
+  flex: 1;
+}
+
+.picker {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.picker-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px;
+  border-bottom: 1px solid #f1f5f9;
+}
+
+.picker-title {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.picker-body {
+  flex: 1;
+  padding: 16px;
+  overflow-y: auto;
+}
+
+.picker-label {
+  font-size: 14px;
+  font-weight: 600;
+  color: #1a1a2e;
+  margin-bottom: 12px;
+  margin-top: 8px;
+}
+
+.subject-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.chip {
+  padding: 8px 14px;
+  border-radius: 20px;
+  background: #f1f5f9;
+  font-size: 13px;
+  color: #334155;
+  cursor: pointer;
+}
+
+.chip.active {
+  background: #3b82f6;
+  color: white;
+}
+
+.knowledge-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.knowledge-option {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 14px;
+  background: #f8fafc;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  cursor: pointer;
+}
+
+.knowledge-option.active {
+  border-color: #3b82f6;
+  background: #eff6ff;
+}
+
+.knowledge-name {
+  font-size: 14px;
+  color: #1a1a2e;
+  flex: 1;
+}
+
+.knowledge-count {
+  font-size: 12px;
+  color: #3b82f6;
+  margin-left: 8px;
+}
+
+.empty-tip {
+  text-align: center;
+  color: #94a3b8;
+  font-size: 13px;
+  padding: 20px 0;
+}
+
+.loading-container {
+  display: flex;
+  justify-content: center;
+  padding: 24px 0;
+}
+
+.picker-footer {
+  padding: 16px;
+  border-top: 1px solid #f1f5f9;
 }
 </style>
