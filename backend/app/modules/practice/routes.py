@@ -11,6 +11,7 @@ async def start_practice(
     config: PracticeConfig,
     user: dict = Depends(get_current_user)
 ):
+    """开始（或恢复）练习：相同配置存在未完成会话时从下一未完成题继续。"""
     try:
         session = await PracticeService.create_session(
             user_id=str(user["_id"]),
@@ -20,27 +21,8 @@ async def start_practice(
             question_count=config.question_count,
             difficulty=config.difficulty
         )
-
         question = await PracticeService.get_current_question(session)
-        question_response = {
-            "id": str(question["_id"]),
-            "type": question["type"],
-            "content": question["content"],
-            "options": question.get("options"),
-            "difficulty": question["difficulty"],
-            "knowledge_ids": question.get("knowledge_ids", [])
-        } if question else None
-
-        return {
-            "session_id": session["id"],
-            "current_question": question_response,
-            "progress": {
-                "current": 0,
-                "total": session["total"],
-                "correct": 0,
-                "accuracy": 0
-            }
-        }
+        return PracticeService.build_session_payload(session, question)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -50,40 +32,45 @@ async def submit_answer(
     submit_data: PracticeSubmit,
     user: dict = Depends(get_current_user)
 ):
+    """提交当前题答案：每题只接受一次，重复提交回读既有结果。"""
     try:
-        result = await PracticeService.submit_answer(
+        return await PracticeService.submit_answer(
             session_id=submit_data.session_id,
             user_id=str(user["_id"]),
             question_id=submit_data.question_id,
             user_answer=submit_data.user_answer
         )
-        return result
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
 
-@router.get("/navigate/{session_id}/{direction}")
-async def navigate(
+@router.get("/session/{session_id}")
+async def get_session(
     session_id: str,
-    direction: str,
     user: dict = Depends(get_current_user)
 ):
+    """按会话恢复练习现场（刷新/重进后回读）。"""
+    session = await PracticeService.get_session(session_id, str(user["_id"]))
+    if not session:
+        raise HTTPException(status_code=404, detail="练习会话不存在")
+
+    question = await PracticeService.get_current_question(session)
+    return PracticeService.build_session_payload(session, question)
+
+
+@router.get("/session/{session_id}/question/{index}")
+async def get_question_at(
+    session_id: str,
+    index: int,
+    user: dict = Depends(get_current_user)
+):
+    """只读查看指定位置的题目及作答记录，不影响练习进度。"""
     try:
-        question = await PracticeService.navigate_question(
+        return await PracticeService.get_question_at(
             session_id=session_id,
             user_id=str(user["_id"]),
-            direction=direction
+            index=index
         )
-        if question:
-            return {
-                "id": str(question["_id"]),
-                "type": question["type"],
-                "content": question["content"],
-                "options": question.get("options"),
-                "difficulty": question["difficulty"],
-                "knowledge_ids": question.get("knowledge_ids", [])
-            }
-        return None
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -100,28 +87,3 @@ async def get_progress(
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-
-
-@router.get("/session/{session_id}")
-async def get_session(
-    session_id: str,
-    user: dict = Depends(get_current_user)
-):
-    session = await PracticeService.get_session(session_id, str(user["_id"]))
-    if not session:
-        raise HTTPException(status_code=404, detail="练习会话不存在")
-
-    question = await PracticeService.get_current_question(session)
-    question_response = {
-        "id": str(question["_id"]),
-        "type": question["type"],
-        "content": question["content"],
-        "options": question.get("options"),
-        "difficulty": question["difficulty"],
-        "knowledge_ids": question.get("knowledge_ids", [])
-    } if question else None
-
-    return {
-        "session": session,
-        "current_question": question_response
-    }

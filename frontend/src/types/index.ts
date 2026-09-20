@@ -65,18 +65,48 @@ export interface PracticeSession {
   correct_count: number
 }
 
+export interface AnswerRecord {
+  user_answer: any
+  is_correct: boolean
+  correct_answer: any
+  explanation?: string
+  submitted_at?: string
+}
+
+export interface PracticeProgress {
+  current: number
+  total: number
+  correct: number
+  accuracy: number
+}
+
+export interface PracticeStartResult {
+  session_id: string
+  mode: string
+  current_question: Question | null
+  progress: PracticeProgress
+  answers: Record<string, AnswerRecord>
+  is_finished: boolean
+  final_accuracy: number | null
+}
+
 export interface PracticeResult {
   question_id: string
   is_correct: boolean
   correct_answer: any
   explanation?: string
-  progress: {
-    current: number
-    total: number
-    correct: number
-    accuracy: number
-  }
+  progress: PracticeProgress
+  next_index: number
   is_finished: boolean
+  final_accuracy: number | null
+  replayed: boolean
+}
+
+export interface SessionQuestion {
+  question: Question
+  record: AnswerRecord | null
+  index: number
+  progress: PracticeProgress
 }
 
 export interface ExamResult {

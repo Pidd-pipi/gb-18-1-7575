@@ -5,7 +5,7 @@ from pydantic import BaseModel
 
 class PracticeConfig(BaseModel):
     mode: str
-    subject_id: str
+    subject_id: Optional[str] = None
     knowledge_ids: Optional[List[str]] = None
     question_count: int = 20
     difficulty: Optional[str] = None

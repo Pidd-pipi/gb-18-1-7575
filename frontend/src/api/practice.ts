@@ -1,18 +1,18 @@
 import request from './request'
-import type { Question, PracticeResult } from '@/types'
+import type {
+  PracticeResult,
+  PracticeStartResult,
+  SessionQuestion
+} from '@/types'
 
 export const startPractice = (data: {
   mode: string
-  subject_id: string
+  subject_id?: string
   knowledge_ids?: string[]
   question_count: number
   difficulty?: string
 }) => {
-  return request.post<{
-    session_id: string
-    current_question: Question
-    progress: { current: number; total: number; correct: number; accuracy: number }
-  }>('/practice/start', data)
+  return request.post<PracticeStartResult>('/practice/start', data)
 }
 
 export const submitAnswer = (sessionId: string, questionId: string, userAnswer: any) => {
@@ -23,8 +23,12 @@ export const submitAnswer = (sessionId: string, questionId: string, userAnswer: 
   })
 }
 
-export const navigateQuestion = (sessionId: string, direction: 'prev' | 'next') => {
-  return request.get<Question>(`/practice/navigate/${sessionId}/${direction}`)
+export const getPracticeSession = (sessionId: string) => {
+  return request.get<PracticeStartResult>(`/practice/session/${sessionId}`)
+}
+
+export const getQuestionAt = (sessionId: string, index: number) => {
+  return request.get<SessionQuestion>(`/practice/session/${sessionId}/question/${index}`)
 }
 
 export const getSessionProgress = (sessionId: string) => {
@@ -34,5 +38,7 @@ export const getSessionProgress = (sessionId: string) => {
     correct: number
     accuracy: number
     answers: Record<string, any>
+    is_finished: boolean
+    final_accuracy: number | null
   }>(`/practice/progress/${sessionId}`)
 }

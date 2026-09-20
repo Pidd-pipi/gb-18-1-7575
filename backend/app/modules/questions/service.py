@@ -110,6 +110,17 @@ class QuestionService:
         return [question_map[qid] for qid in question_ids if qid in question_map]
 
     @staticmethod
+    async def record_answer_stats(question_id: str, is_correct: bool):
+        """题目答题统计，仅在答案被首次接受后调用。"""
+        db = get_db()
+        if not ObjectId.is_valid(question_id):
+            return
+        update_data = {"$inc": {"stats.answered": 1}}
+        if is_correct:
+            update_data["$inc"]["stats.correct"] = 1
+        await db.questions.update_one({"_id": ObjectId(question_id)}, update_data)
+
+    @staticmethod
     async def check_answer(
         question_id: str,
         user_answer: Any,
@@ -123,11 +134,7 @@ class QuestionService:
         correct_answer = question["correct_answer"]
         is_correct = QuestionService.compare_answers(question["type"], user_answer, correct_answer)
 
-        update_data = {"$inc": {"stats.answered": 1}}
-        if is_correct:
-            update_data["$inc"]["stats.correct"] = 1
-
-        await db.questions.update_one({"_id": ObjectId(question_id)}, update_data)
+        await QuestionService.record_answer_stats(question_id, is_correct)
 
         return AnswerResult(
             question_id=question_id,

@@ -209,6 +209,8 @@ const selectKnowledge = (node: KnowledgeNode) => {
     showToast('该知识点下暂无题目')
     return
   }
+  // 选定知识点后按固定题序开始顺序练习
+  selectedMode.value = 'sequential'
   selectedKnowledge.value = node
   showModeSelector.value = true
 }

@@ -50,8 +50,11 @@ class ExamService:
         session_dict["id"] = str(result.inserted_id)
 
         if redis:
-            key = f"exam:{user_id}:{str(result.inserted_id)}"
-            await redis.setex(key, duration_minutes * 60 + 300, json.dumps(session_dict))
+            try:
+                key = f"exam:{user_id}:{str(result.inserted_id)}"
+                await redis.setex(key, duration_minutes * 60 + 300, json.dumps(session_dict, default=str))
+            except Exception:
+                pass
 
         return session_dict
 
@@ -61,10 +64,13 @@ class ExamService:
         redis = get_redis()
 
         if redis and not include_answers:
-            key = f"exam:{user_id}:{session_id}"
-            cached = await redis.get(key)
-            if cached:
-                return json.loads(cached)
+            try:
+                key = f"exam:{user_id}:{session_id}"
+                cached = await redis.get(key)
+                if cached:
+                    return json.loads(cached)
+            except Exception:
+                pass
 
         if not ObjectId.is_valid(session_id):
             return None
@@ -170,8 +176,11 @@ class ExamService:
         )
 
         if redis:
-            key = f"exam:{user_id}:{session_id}"
-            await redis.delete(key)
+            try:
+                key = f"exam:{user_id}:{session_id}"
+                await redis.delete(key)
+            except Exception:
+                pass
 
         return {
             "id": session_id,
